@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  [data-theme="sepia"] {
+    --background: 40 33% 96%;
+    --foreground: 160 28% 12%;
+    --card: 40 40% 98%;
+    --card-foreground: 160 28% 12%;
+    --popover: 40 40% 98%;
+    --popover-foreground: 160 28% 12%;
+    --primary: 158 42% 22%;
+    --primary-foreground: 40 33% 96%;
+    --secondary: 38 24% 90%;
+    --secondary-foreground: 160 28% 16%;
+    --muted: 38 20% 91%;
+    --muted-foreground: 160 10% 40%;
+    --accent: 28 55% 52%;
+    --accent-foreground: 40 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 38 18% 84%;
+    --input: 38 18% 84%;
+    --ring: 158 42% 22%;
+    --radius: 0.75rem;
+    --sidebar-background: 158 35% 14%;
+    --sidebar-foreground: 40 30% 92%;
+    --sidebar-primary: 28 55% 52%;
+    --sidebar-primary-foreground: 40 40% 98%;
+    --sidebar-accent: 158 28% 20%;
+    --sidebar-accent-foreground: 40 30% 94%;
+    --sidebar-border: 158 24% 22%;
+    --sidebar-ring: 28 55% 52%;
+  }
+
+  [data-theme="dark"] {
+    --background: 220 20% 8%;
+    --foreground: 40 30% 94%;
+    --card: 220 18% 12%;
+    --card-foreground: 40 30% 94%;
+    --popover: 220 18% 12%;
+    --popover-foreground: 40 30% 94%;
+    --primary: 158 42% 34%;
+    --primary-foreground: 220 20% 8%;
+    --secondary: 220 14% 18%;
+    --secondary-foreground: 40 30% 92%;
+    --muted: 220 12% 16%;
+    --muted-foreground: 220 10% 62%;
+    --accent: 28 70% 58%;
+    --accent-foreground: 220 20% 8%;
+    --destructive: 0 62% 46%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 14% 22%;
+    --input: 220 14% 22%;
+    --ring: 158 42% 34%;
+    --radius: 0.75rem;
+    --sidebar-background: 220 24% 6%;
+    --sidebar-foreground: 40 30% 92%;
+    --sidebar-primary: 28 70% 58%;
+    --sidebar-primary-foreground: 220 20% 8%;
+    --sidebar-accent: 220 18% 16%;
+    --sidebar-accent-foreground: 40 30% 94%;
+    --sidebar-border: 220 16% 18%;
+    --sidebar-ring: 28 70% 58%;
+  }
+
+  [data-theme="white"] {
+    --background: 210 40% 98%;
+    --foreground: 210 25% 16%;
+    --card: 210 40% 100%;
+    --card-foreground: 210 25% 16%;
+    --popover: 210 40% 100%;
+    --popover-foreground: 210 25% 16%;
+    --primary: 210 70% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 30% 94%;
+    --secondary-foreground: 210 25% 20%;
+    --muted: 210 30% 93%;
+    --muted-foreground: 210 12% 42%;
+    --accent: 210 90% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 210 30% 88%;
+    --input: 210 30% 88%;
+    --ring: 210 70% 55%;
+    --radius: 1rem;
+    --sidebar-background: 210 40% 100%;
+    --sidebar-foreground: 210 25% 16%;
+    --sidebar-primary: 210 70% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 50% 92%;
+    --sidebar-accent-foreground: 210 30% 20%;
+    --sidebar-border: 210 40% 90%;
+    --sidebar-ring: 210 70% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    min-height: 100vh;
+    transition: background-color 0.4s ease, color 0.4s ease;
+  }
+
+  [data-theme="sepia"] body {
+    background-image:
+      radial-gradient(ellipse 80% 50% at 100% -10%, hsl(28 55% 52% / 0.12), transparent),
+      radial-gradient(ellipse 60% 40% at 0% 100%, hsl(158 42% 22% / 0.08), transparent);
+  }
+
+  [data-theme="dark"] body {
+    background-image:
+      radial-gradient(ellipse 80% 50% at 100% -10%, hsl(158 42% 34% / 0.12), transparent),
+      radial-gradient(ellipse 60% 40% at 0% 100%, hsl(210 70% 45% / 0.08), transparent);
+  }
+
+  [data-theme="white"] body {
+    background-image:
+      radial-gradient(ellipse 70% 60% at 20% -10%, hsl(210 90% 60% / 0.18), transparent),
+      radial-gradient(ellipse 60% 50% at 100% 110%, hsl(28 90% 60% / 0.16), transparent),
+      linear-gradient(135deg, hsl(210 60% 88% / 0.4), hsl(210 40% 96% / 0.6));
+  }
+}
+
+@layer components {
+  /* Frosted-glass surfaces used in the "white" theme (iOS-style translucency). */
+  [data-theme="white"] .glass,
+  [data-theme="white"] .card,
+  [data-theme="white"] .bg-card {
+    background-color: hsl(var(--card) / 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid hsl(var(--border) / 0.6);
+  }
+
+  [data-theme="white"] .bg-secondary {
+    background-color: hsl(var(--secondary) / 0.7);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+  }
+
+  [data-theme="white"] .bg-muted {
+    background-color: hsl(var(--muted) / 0.6);
+  }
+}
+
+/* KaTeX math: allow long display equations to scroll instead of overflowing chat bubbles. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
