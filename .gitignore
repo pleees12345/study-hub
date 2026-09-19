@@ -22,3 +22,6 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Backend secrets (Groq key lives here — never commit)
+backend/.env

@@ -1,3 +1,5 @@
+import { API_BASE } from "@/lib/api-base";
+
 export type WeakArea = {
   subject: string;
   topic: string;
@@ -94,17 +96,28 @@ export type ChatMessage = {
 };
 
 /**
- * The Groq key is baked into the client build as VITE_GROQ_API_KEY so the AI keeps
- * working in a packaged app (Tauri / Electron / PWA) where there is no dev-server
- * proxy. In local dev we still use the Vite proxy (which hides the key) unless a
- * client key is present.
+ * Where Groq requests are sent, in priority order:
+ *
+ * 1. A backend proxy (VITE_API_BASE). Recommended — it works behind a school
+ *    firewall (only one origin to allow) and keeps the key off the device.
+ * 2. A Groq key baked into the build (VITE_GROQ_API_KEY) for a packaged
+ *    Electron/PWA app where there is no proxy and no backend.
+ * 3. The Vite dev-server proxy (/api/groq), which hides the key in local dev.
  */
 const GROQ_API_KEY = (import.meta.env.VITE_GROQ_API_KEY as string | undefined)?.trim();
-const GROQ_BASE = GROQ_API_KEY ? "https://api.groq.com/openai/v1" : "/api/groq";
+const GROQ_BASE = (() => {
+  if (API_BASE) return `${API_BASE}/api/groq`;
+  if (GROQ_API_KEY) return "https://api.groq.com/openai/v1";
+  return "/api/groq";
+})();
+
+// The backend injects the bearer token itself, so the client never needs to send
+// a key. Only send one when talking directly to Groq with a baked-in key.
+const SEND_API_KEY = Boolean(GROQ_API_KEY && !API_BASE);
 
 function groqHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (GROQ_API_KEY) headers.Authorization = `Bearer ${GROQ_API_KEY}`;
+  if (SEND_API_KEY) headers.Authorization = `Bearer ${GROQ_API_KEY}`;
   return headers;
 }
 
@@ -174,8 +187,9 @@ function extractJson<T>(raw: string): T {
 }
 
 export function hasGroqKey() {
-  // Works in local dev via the Vite proxy, or in a packaged app via the baked-in key.
-  return Boolean(GROQ_API_KEY);
+  // True when the AI can reach Groq: via the backend proxy, a baked-in key,
+  // or the Vite dev proxy. The key isn't required on the client for either proxy.
+  return Boolean(API_BASE || GROQ_API_KEY);
 }
 
 export async function analyzeExam(input: {

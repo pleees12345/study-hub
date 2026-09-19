@@ -6,6 +6,8 @@
  * source for quick facts and definitions. No API keys required.
  */
 
+import { API_BASE } from "@/lib/api-base";
+
 export type WebSource = {
   title: string;
   url: string;
@@ -18,6 +20,20 @@ export type WebSearchResult = {
 };
 
 const WIKI_API = "https://en.wikipedia.org/w/api.php";
+const DDG_API = "https://api.duckduckgo.com";
+
+// When a backend proxy is configured, route research through it too — a school
+// firewall will block Wikipedia/DuckDuckGo just like it blocks Groq.
+// `params` is a query string WITHOUT the leading "?", e.g. "action=query&format=json".
+function wikiUrl(params: string): string {
+  const base = API_BASE ? `${API_BASE}/api/wiki` : WIKI_API;
+  return `${base}?${params}`;
+}
+
+function ddgUrl(params: string): string {
+  const base = API_BASE ? `${API_BASE}/api/ddg` : DDG_API;
+  return `${base}?${params}`;
+}
 
 /** Tops out a snippet so we don't feed the model thousands of words per result. */
 function clip(text: string, max = 1200): string {
@@ -76,9 +92,11 @@ function cleanQuery(query: string): string {
 
 /** Full-text search (list=search) — much better than opensearch for natural-language queries. */
 async function wikiSearchTitles(query: string, limit = 6): Promise<string[]> {
-  const url = `${WIKI_API}?action=query&list=search&srsearch=${encodeURIComponent(
-    query,
-  )}&srlimit=${limit}&format=json&origin=*`;
+  const url = wikiUrl(
+    `action=query&list=search&srsearch=${encodeURIComponent(
+      query,
+    )}&srlimit=${limit}&format=json&origin=*`,
+  );
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Wikipedia search failed (${res.status})`);
   const data = (await res.json()) as {
@@ -95,9 +113,11 @@ async function wikiExtracts(titles: string[]): Promise<Map<string, string>> {
   const joined = titles.join("|");
   // NOTE: do NOT use exintro=1 — the intro is often just adaptation trivia and
   // omits the actual plot/content. Fetch the full article text instead.
-  const url = `${WIKI_API}?action=query&prop=extracts&explaintext=1&format=json&origin=*&titles=${encodeURIComponent(
-    joined,
-  )}`;
+  const url = wikiUrl(
+    `action=query&prop=extracts&explaintext=1&format=json&origin=*&titles=${encodeURIComponent(
+      joined,
+    )}`,
+  );
   const res = await fetch(url);
   if (!res.ok) return out;
   const data = (await res.json()) as {
@@ -112,9 +132,9 @@ async function wikiExtracts(titles: string[]): Promise<Map<string, string>> {
 
 async function duckDuckGoAnswer(query: string): Promise<string> {
   try {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(
-      query,
-    )}&format=json&no_html=1&skip_disambig=1`;
+    const url = ddgUrl(
+      `q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
+    );
     const res = await fetch(url);
     if (!res.ok) return "";
     const data = (await res.json()) as {

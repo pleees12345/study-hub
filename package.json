@@ -13,7 +13,9 @@
     "typecheck": "tsc -b --noEmit",
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5183 && cross-env VITE_DEV_SERVER_URL=http://localhost:5183 electron .\"",
     "electron:build": "npm run build && electron-builder --mac",
-    "electron:build:win": "npm run build && electron-builder --win"
+    "electron:build:win": "npm run build && electron-builder --win",
+    "api": "node backend/server.mjs",
+    "api:dev": "node --watch backend/server.mjs"
   },
   "build": {
     "appId": "com.ericdraperi.studyhub",
