@@ -2,8 +2,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, Apple, BrainCircuit, Download, MonitorDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { PLATFORMS, isConfigured } from "@/lib/downloads";
-import { cn } from "@/lib/utils";
+import { PLATFORMS } from "@/lib/downloads";
 
 const sections = [
   {
@@ -76,18 +75,13 @@ export function HomePage() {
         <div className="grid gap-4 sm:grid-cols-2">
           {PLATFORMS.map((p) => {
             const Icon = p.id === "mac" ? Apple : MonitorDown;
-            const ready = isConfigured(p.url);
             return (
               <a
                 key={p.id}
-                href={ready ? p.url : undefined}
+                href={p.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-disabled={!ready}
-                className={cn(
-                  "group flex items-center gap-4 rounded-xl border p-4 transition-colors",
-                  ready ? "hover:border-accent hover:bg-accent/5" : "opacity-60",
-                )}
+                className="group flex items-center gap-4 rounded-xl border p-4 transition-colors hover:border-accent hover:bg-accent/5"
               >
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <Icon className="h-6 w-6" />
@@ -100,7 +94,7 @@ export function HomePage() {
                 </div>
                 <span className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground transition-colors group-hover:bg-accent/90">
                   <Download className="h-4 w-4" />
-                  {ready ? "Download" : "Soon"}
+                  Download
                 </span>
               </a>
             );
