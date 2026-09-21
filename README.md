@@ -7,11 +7,11 @@ A calm place to plan, practice, and improve — an AI-powered study companion fo
 - **Revision workspaces** — scan exams and generate AI study materials (video, audio, slides).
 - **Exam preparation** — generate realistic GCSE / A-Level past-paper-style exams with AI, then grade your answers against the mark scheme.
 - **Tutor chat** — ask an AI tutor anything, with live web research and full math rendering (KaTeX) plus function graphs and geometric figures.
-- **Desktop apps** for macOS and Windows (see [Releases](https://github.com/ericdraperi/study-hub/releases)).
+- **Desktop apps** for macOS and Windows (see [Releases](https://github.com/pleees12345/study-hub/releases)).
 
 ## Download
 
-Get the desktop app from the [latest release](https://github.com/ericdraperi/study-hub/releases/latest):
+Get the desktop app from the [latest release](https://github.com/pleees12345/study-hub/releases/latest):
 
 | Platform | File |
 | --- | --- |

@@ -75,12 +75,14 @@ export function ChatPage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-3xl flex-col gap-4">
-      <div>
-        <h2 className="font-display text-3xl font-semibold tracking-tight">Tutor chat</h2>
-        <p className="mt-1 max-w-2xl text-muted-foreground">
-          Ask a question and get a teacher-style explanation, with conversation history kept on screen.
-        </p>
+    <div className="flex h-[calc(100vh-8rem)] w-full flex-col gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-3xl font-semibold tracking-tight">Tutor chat</h2>
+          <p className="mt-1 max-w-2xl text-muted-foreground">
+            Ask a question and get a teacher-style explanation, with conversation history kept on screen.
+          </p>
+        </div>
         <button
           type="button"
           onClick={() => setWebEnabled((v) => !v)}

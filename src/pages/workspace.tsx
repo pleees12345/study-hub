@@ -4,15 +4,20 @@ import {
   ArrowLeft,
   AudioLines,
   BookOpenCheck,
+  Clock,
   Download,
   FileScan,
   FileText,
   Library,
   Loader2,
   MessageCircle,
+  PencilLine,
+  Play,
   Presentation,
   Send,
   Sparkles,
+  StopCircle,
+  Timer,
   Trash2,
   Upload,
   Video,
@@ -25,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownMessage } from "@/components/markdown-message";
+import { DrawingBoard } from "@/components/drawing-board";
 import { cn } from "@/lib/utils";
 import {
   analyzeExam,
@@ -87,6 +93,17 @@ const FALLBACK_WEAK_AREAS: WeakArea[] = [
     insight: "Scan an exam or add notes to get AI-highlighted weak areas.",
   },
 ];
+
+/** Format seconds as "MM:SS" (or "H:MM:SS" past an hour). */
+function formatTime(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(s / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const seconds = s % 60;
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 
 export function WorkspacePage() {
   const { id } = useParams<{ id: string }>();
@@ -153,13 +170,26 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
 
   // Exam preparation state
   const [examLevel, setExamLevel] = useState<ExamLevel>("GCSE");
+  const [customLevel, setCustomLevel] = useState("");
   const [examBoard, setExamBoard] = useState("AQA");
   const [examTopic, setExamTopic] = useState("");
   const [examLoading, setExamLoading] = useState(false);
   const [examError, setExamError] = useState("");
   const [examAnswers, setExamAnswers] = useState<Record<number, string>>({});
+  const [examDrawings, setExamDrawings] = useState<Record<number, string>>({});
   const [grading, setGrading] = useState(false);
   const [gradingError, setGradingError] = useState("");
+
+  // Timed test state
+  const [examRunning, setExamRunning] = useState(false);
+  const [examFinished, setExamFinished] = useState(false);
+  const [examDuration, setExamDuration] = useState(30); // minutes
+  const [examDeadline, setExamDeadline] = useState<number | null>(null); // epoch ms
+  const [examTimeLeft, setExamTimeLeft] = useState(0); // seconds
+  // Fullscreen "lockdown" — true while the test is running but the user has
+  // left fullscreen (e.g. pressed Esc), so we can block the page until they
+  // resume fullscreen or finish the test.
+  const [fullscreenExited, setFullscreenExited] = useState(false);
 
   const uploadLabel = file ? file.name : "Upload an exam PDF or image";
 
@@ -347,11 +377,20 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
     setExamLoading(true);
     setExamError("");
     try {
+      const level = examLevel === "Custom" ? customLevel.trim() : examLevel;
+      // Base the paper on the student's saved course notes/files when present.
+      const notes = [
+        workspace.summary.trim(),
+        ...workspace.files.map((f) => (f.text.trim() ? `${f.name}:\n${f.text.trim()}` : "")),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       const paper = await generateExamPaper({
         subject: workspace.subject || "General",
-        level: examLevel,
+        level: level || "General",
         board: examBoard,
         topic: examTopic.trim() || undefined,
+        notes: notes || undefined,
       });
       setExamPaper(workspace.id, paper);
       setExamAnswers({});
@@ -371,6 +410,7 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
       const answers: ExamAnswer[] = workspace.examPaper.questions.map((q) => ({
         number: q.number,
         answer: (examAnswers[q.number] || "").trim(),
+        drawingDataUrl: examDrawings[q.number] || undefined,
       }));
       const grade = await gradeExam({ paper: workspace.examPaper, answers });
       setExamGrade(workspace.id, grade);
@@ -381,7 +421,84 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
     }
   }
 
+  // Timer for the timed test: count down every second and auto-finish at zero.
+  useEffect(() => {
+    if (!examRunning || examDeadline === null) return;
+    const tick = () => {
+      const left = Math.max(0, Math.round((examDeadline - Date.now()) / 1000));
+      setExamTimeLeft(left);
+      if (left <= 0) {
+        setExamRunning(false);
+        setExamFinished(true);
+        if (document.fullscreenElement) {
+          void document.exitFullscreen?.().catch(() => {});
+        }
+        // Auto-submit once time is up.
+        void handleGradeExam();
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examRunning, examDeadline]);
+
+  // Enter fullscreen when the test starts and watch for the user leaving
+  // fullscreen mid-test (Esc, etc.). If they do and the test is still running,
+  // show a blocking overlay prompting them to resume or finish.
+  useEffect(() => {
+    if (!examRunning) return;
+
+    let cancelled = false;
+    const enterFullscreen = async () => {
+      try {
+        await document.documentElement.requestFullscreen?.();
+      } catch {
+        // Fullscreen may not be available; that's fine — we still track it.
+      }
+      if (!cancelled) setFullscreenExited(false);
+    };
+    void enterFullscreen();
+
+    const onFullscreenChange = () => {
+      const isFullscreen = Boolean(document.fullscreenElement);
+      if (!isFullscreen) setFullscreenExited(true);
+      else setFullscreenExited(false);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+    };
+  }, [examRunning]);
+
+  function handleStartExam() {
+    setExamAnswers({});
+    setExamDrawings({});
+    setExamGrade(workspace.id, null);
+    setExamFinished(false);
+    setFullscreenExited(false);
+    const durationSeconds = Math.max(1, examDuration) * 60;
+    setExamDeadline(Date.now() + durationSeconds * 1000);
+    setExamTimeLeft(durationSeconds);
+    setExamRunning(true);
+  }
+
+  function handleFinishExam() {
+    setExamRunning(false);
+    setExamFinished(true);
+    setExamDeadline(null);
+    setFullscreenExited(false);
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.().catch(() => {});
+    }
+    void handleGradeExam();
+  }
+
   const weakAreas = workspace.weakAreas.length ? workspace.weakAreas : FALLBACK_WEAK_AREAS;
+  const totalMarks = workspace.examPaper
+    ? workspace.examPaper.questions.reduce((sum, q) => sum + q.marks, 0)
+    : 0;
 
   // Re-hydrate generated video/audio blobs from IndexedDB on mount, since
   // `blob:` URLs do not survive a page reload or navigation.
@@ -896,233 +1013,401 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BookOpenCheck className="h-5 w-5 text-accent" />
-                Generate an exam paper
+                Exam paper
               </CardTitle>
-              <CardDescription>
-                Create a realistic GCSE or A-Level practice paper for this subject, inspired by real
-                past papers found on the web.
-              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="exam-level">Exam level</Label>
-                  <select
-                    id="exam-level"
-                    value={examLevel}
-                    onChange={(event) => setExamLevel(event.target.value as ExamLevel)}
-                    className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {EXAM_LEVELS.map((level) => (
-                      <option key={level} value={level}>
-                        {level}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="exam-board">Exam board</Label>
-                  <select
-                    id="exam-board"
-                    value={examBoard}
-                    onChange={(event) => setExamBoard(event.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {EXAM_BOARDS.map((board) => (
-                      <option key={board} value={board}>
-                        {board}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="exam-topic">Topic focus (optional)</Label>
-                <Input
-                  id="exam-topic"
-                  value={examTopic}
-                  onChange={(event) => setExamTopic(event.target.value)}
-                  placeholder="e.g. Algebra, Cell biology, Shakespeare — leave blank for the full specification"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={handleGenerateExam} disabled={examLoading}>
-                  {examLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpenCheck className="h-4 w-4" />}
-                  {examLoading ? "Generating paper…" : "Generate exam paper"}
-                </Button>
-                <Badge variant="accent">Inspired by past papers</Badge>
-              </div>
+            <CardContent className="space-y-3">
+              <Button className="w-full" onClick={handleGenerateExam} disabled={examLoading}>
+                {examLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpenCheck className="h-4 w-4" />}
+                {examLoading ? "Generating paper…" : "Generate exam paper"}
+              </Button>
+              {(workspace.summary.trim() || workspace.files.some((f) => f.text.trim())) && (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-accent" />
+                  This paper will be based on your saved course notes.
+                </p>
+              )}
               {examError && <p className="text-sm text-destructive">{examError}</p>}
+
+              <details className="rounded-lg border bg-muted/20 px-3 py-2">
+                <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
+                  Exam settings
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="exam-level">Level</Label>
+                      <select
+                        id="exam-level"
+                        value={examLevel}
+                        onChange={(event) => setExamLevel(event.target.value as ExamLevel)}
+                        className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {EXAM_LEVELS.map((level) => (
+                          <option key={level} value={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                      {examLevel === "Custom" && (
+                        <Input
+                          value={customLevel}
+                          onChange={(event) => setCustomLevel(event.target.value)}
+                          placeholder="e.g. 3e année collège, Bac, CAP, university…"
+                          className="mt-1"
+                        />
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="exam-board">Board / system</Label>
+                      <select
+                        id="exam-board"
+                        value={examBoard}
+                        onChange={(event) => setExamBoard(event.target.value)}
+                        className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {EXAM_BOARDS.map((board) => (
+                          <option key={board} value={board}>
+                            {board}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="exam-topic">Topic focus (optional)</Label>
+                    <Input
+                      id="exam-topic"
+                      value={examTopic}
+                      onChange={(event) => setExamTopic(event.target.value)}
+                      placeholder="e.g. Algebra, Cell biology, Shakespeare — leave blank for the full specification"
+                    />
+                  </div>
+                </div>
+              </details>
             </CardContent>
           </Card>
 
           {workspace.examPaper && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-lg">{workspace.examPaper.title}</CardTitle>
-                    <CardDescription>
-                      {workspace.examPaper.level} · {workspace.examPaper.board} ·{" "}
-                      {workspace.examPaper.subject}
-                    </CardDescription>
-                  </div>
-                  <Badge variant="accent">{workspace.examPaper.paper}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {workspace.examPaper.overview && (
-                  <div className="rounded-lg bg-secondary/60 px-4 py-3 text-sm leading-relaxed">
-                    <MarkdownMessage content={workspace.examPaper.overview} />
-                  </div>
-                )}
-                <div className="space-y-3">
-                  {workspace.examPaper.questions.map((q) => (
-                    <div key={q.number} className="rounded-lg border p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">
-                          Question {q.number} · {q.topic}
-                        </span>
-                        <Badge variant="secondary">{q.marks} marks</Badge>
-                      </div>
-                      <MarkdownMessage content={q.question} />
-                      <div className="mt-3 space-y-2">
-                        <Label htmlFor={`answer-${q.number}`}>Your answer</Label>
-                        <Textarea
-                          id={`answer-${q.number}`}
-                          value={examAnswers[q.number] || ""}
-                          onChange={(event) =>
-                            setExamAnswers((prev) => ({
-                              ...prev,
-                              [q.number]: event.target.value,
-                            }))
-                          }
-                          placeholder="Type your answer here…"
-                          className="min-h-[90px]"
-                        />
-                      </div>
-                      {q.markScheme && (
-                        <details className="mt-2">
-                          <summary className="cursor-pointer text-sm text-accent">
-                            Mark scheme
-                          </summary>
-                          <div className="mt-1 rounded-md bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                            <MarkdownMessage content={q.markScheme} />
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  ))}
+            <div className="space-y-4">
+              {/* ===== Exam paper cover ===== */}
+              <div className="rounded-xl border bg-card p-6 shadow-sm">
+                <div className="text-center">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                    Practice exam
+                  </p>
+                  <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight">
+                    {workspace.examPaper.title}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {workspace.examPaper.subject} · {workspace.examPaper.level} ·{" "}
+                    {workspace.examPaper.board}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {workspace.examPaper.paper} · Total: {totalMarks} marks
+                  </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button onClick={handleGradeExam} disabled={grading}>
+                <div className="mt-5 flex flex-col gap-3 border-t pt-4">
+                  {examRunning ? (
+                    <div
+                      className={cn(
+                        "flex items-center justify-between rounded-lg border px-4 py-3",
+                        examTimeLeft <= 60
+                          ? "border-destructive/50 bg-destructive/10"
+                          : "border-accent/30 bg-accent/5",
+                      )}
+                    >
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Timer className="h-5 w-5 text-accent" />
+                        Time remaining
+                      </div>
+                      <p className="font-display text-2xl font-semibold tabular-nums">
+                        {formatTime(examTimeLeft)}
+                      </p>
+                      <Button variant="secondary" onClick={handleFinishExam} disabled={grading}>
+                        <StopCircle className="h-4 w-4" />
+                        Finish test
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Clock className="h-4 w-4 text-accent" />
+                        Recommended time: {examDuration} minutes
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          value={examDuration}
+                          onChange={(event) =>
+                            setExamDuration(Math.max(1, Number(event.target.value) || 1))
+                          }
+                          className="w-28"
+                          aria-label="Time limit in minutes"
+                        />
+                        <Button onClick={handleStartExam}>
+                          <Play className="h-4 w-4" />
+                          Start test
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {examFinished && (
+                  <div className="mt-3 flex items-center gap-3 rounded-lg border border-emerald-600/30 bg-emerald-600/5 p-3">
+                    <BookOpenCheck className="h-5 w-5 text-emerald-700" />
+                    <div>
+                      <p className="text-sm font-medium">Test submitted</p>
+                      <p className="text-xs text-muted-foreground">
+                        {grading ? "The AI is marking your answers…" : "Your answers have been marked."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ===== Instructions ===== */}
+              {workspace.examPaper.overview && (
+                <div className="rounded-lg border bg-muted/20 px-4 py-3 text-sm">
+                  <p className="mb-1 flex items-center gap-1.5 font-medium">
+                    <PencilLine className="h-4 w-4 text-accent" />
+                    Instructions
+                  </p>
+                  <MarkdownMessage content={workspace.examPaper.overview} />
+                </div>
+              )}
+
+              {/* ===== Questions (paper-like) ===== */}
+              <div className="space-y-5">
+                {workspace.examPaper.questions.map((q) => (
+                  <div key={q.number} className="rounded-lg border bg-card p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-semibold">
+                        Question {q.number}
+                        {q.topic && (
+                          <span className="font-normal text-muted-foreground"> · {q.topic}</span>
+                        )}
+                      </p>
+                      <Badge variant="secondary">{q.marks} marks</Badge>
+                    </div>
+                    <div className="mt-2 text-[1.02rem] leading-relaxed">
+                      <MarkdownMessage content={q.question} />
+                    </div>
+                    <div className="mt-4">
+                      <Label htmlFor={`answer-${q.number}`}>Your answer</Label>
+                      <Textarea
+                        id={`answer-${q.number}`}
+                        value={examAnswers[q.number] || ""}
+                        onChange={(event) =>
+                          setExamAnswers((prev) => ({
+                            ...prev,
+                            [q.number]: event.target.value,
+                          }))
+                        }
+                        placeholder="Write your answer here…"
+                        className="mt-1 min-h-[120px] border-dashed bg-secondary/20 leading-relaxed"
+                      />
+                    </div>
+                    {q.needsDrawing && (
+                      <div className="mt-4 space-y-2">
+                        <Label>Draw your answer / diagram</Label>
+                        <DrawingBoard
+                          onChange={(dataUrl) =>
+                            setExamDrawings((prev) => ({ ...prev, [q.number]: dataUrl }))
+                          }
+                          disabled={examFinished && !examRunning}
+                        />
+                      </div>
+                    )}
+                    {q.markScheme && !examRunning && !examFinished && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-sm text-accent">
+                          Mark scheme
+                        </summary>
+                        <div className="mt-1 rounded-md bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                          <MarkdownMessage content={q.markScheme} />
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* ===== Submit / grade ===== */}
+              <div className="flex flex-wrap items-center gap-2">
+                {examRunning ? (
+                  <Button onClick={handleFinishExam} disabled={grading}>
+                    <StopCircle className="h-4 w-4" />
+                    {grading ? "Submitting…" : "Finish & submit test"}
+                  </Button>
+                ) : (
+                  <Button onClick={handleGradeExam} disabled={grading || examFinished}>
                     {grading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <BookOpenCheck className="h-4 w-4" />
                     )}
-                    {grading ? "Marking…" : "Grade my answers"}
+                    {grading ? "Marking…" : examFinished ? "Re-mark my answers" : "Grade my answers"}
                   </Button>
-                  {gradingError && <p className="text-sm text-destructive">{gradingError}</p>}
-                </div>
+                )}
+                {gradingError && <p className="text-sm text-destructive">{gradingError}</p>}
+              </div>
 
-                {workspace.examGrade && (
-                  <div className="rounded-xl border p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Result</p>
-                        <p className="font-display text-3xl font-semibold">
-                          {workspace.examGrade.grade}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm text-muted-foreground">Score</p>
-                        <p className="text-2xl font-semibold">
-                          {workspace.examGrade.totalAwarded}
-                          <span className="text-muted-foreground"> / {workspace.examGrade.totalMax}</span>
-                        </p>
-                      </div>
+              {/* ===== Result ===== */}
+              {workspace.examGrade && (
+                <div className="rounded-xl border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Result</p>
+                      <p className="font-display text-3xl font-semibold">
+                        {workspace.examGrade.grade}
+                      </p>
                     </div>
-                    {workspace.examGrade.feedback && (
-                      <div className="mt-3 text-sm leading-relaxed">
-                        <MarkdownMessage content={workspace.examGrade.feedback} />
-                      </div>
-                    )}
-                    <div className="mt-4 space-y-3">
-                      {workspace.examGrade.questions.map((g) => (
-                        <div key={g.number} className="rounded-lg border bg-muted/40 p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium">
-                              Question {g.number}
-                            </span>
-                            <Badge variant="secondary">
-                              {g.marksAwarded} / {g.marksMax}
-                            </Badge>
-                          </div>
-                          {g.feedback && (
-                            <div className="mt-1 text-sm text-muted-foreground">
-                              <MarkdownMessage content={g.feedback} />
-                            </div>
-                          )}
-                          {(g.correctPoints.length > 0 || g.missingPoints.length > 0) && (
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              {g.correctPoints.length > 0 && (
-                                <div>
-                                  <p className="text-xs font-medium uppercase tracking-wider text-emerald-700">
-                                    Correct points
-                                  </p>
-                                  <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
-                                    {g.correctPoints.map((p, i) => (
-                                      <li key={i}>{p}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                              {g.missingPoints.length > 0 && (
-                                <div>
-                                  <p className="text-xs font-medium uppercase tracking-wider text-amber-700">
-                                    Missing points
-                                  </p>
-                                  <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
-                                    {g.missingPoints.map((p, i) => (
-                                      <li key={i}>{p}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                            </div>
-                          )}
+                    <div className="text-right">
+                      <p className="text-sm text-muted-foreground">Score</p>
+                      <p className="text-2xl font-semibold">
+                        {workspace.examGrade.totalAwarded}
+                        <span className="text-muted-foreground"> / {workspace.examGrade.totalMax}</span>
+                      </p>
+                    </div>
+                  </div>
+                  {workspace.examGrade.feedback && (
+                    <div className="mt-3 text-sm leading-relaxed">
+                      <MarkdownMessage content={workspace.examGrade.feedback} />
+                    </div>
+                  )}
+                  <div className="mt-4 space-y-3">
+                    {workspace.examGrade.questions.map((g) => (
+                      <div key={g.number} className="rounded-lg border bg-muted/40 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium">
+                            Question {g.number}
+                          </span>
+                          <Badge variant="secondary">
+                            {g.marksAwarded} / {g.marksMax}
+                          </Badge>
                         </div>
-                      ))}
-                    </div>
+                        {g.feedback && (
+                          <div className="mt-1 text-sm text-muted-foreground">
+                            <MarkdownMessage content={g.feedback} />
+                          </div>
+                        )}
+                        {(g.correctPoints.length > 0 ||
+                          g.missingPoints.length > 0 ||
+                          g.spag.length > 0 ||
+                          g.mistakes.length > 0) && (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            {g.correctPoints.length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-emerald-700">
+                                  Correct points
+                                </p>
+                                <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+                                  {g.correctPoints.map((p, i) => (
+                                    <li key={i}>{p}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {g.missingPoints.length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-amber-700">
+                                  Missing points
+                                </p>
+                                <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+                                  {g.missingPoints.map((p, i) => (
+                                    <li key={i}>{p}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {g.mistakes.length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-red-700">
+                                  Mistakes
+                                </p>
+                                <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+                                  {g.mistakes.map((p, i) => (
+                                    <li key={i}>{p}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {g.spag.length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-violet-700">
+                                  SPaG (spelling, punctuation, grammar)
+                                </p>
+                                <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+                                  {g.spag.map((p, i) => (
+                                    <li key={i}>{p}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                )}
+                </div>
+              )}
 
-                {workspace.examPaper.sources.length > 0 && (
-                  <div className="rounded-lg bg-muted/40 p-3 text-sm">
-                    <p className="mb-1 font-medium">Inspired by these past-paper sources</p>
-                    <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-                      {workspace.examPaper.sources.map((s, i) => (
-                        <li key={i}>
-                          <a
-                            href={s.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-accent underline underline-offset-2 hover:text-accent/80"
-                          >
-                            {s.title}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              {/* ===== Sources ===== */}
+              {workspace.examPaper.sources.length > 0 && (
+                <div className="rounded-lg bg-muted/40 p-3 text-sm">
+                  <p className="mb-1 font-medium">Inspired by these past-paper sources</p>
+                  <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                    {workspace.examPaper.sources.map((s, i) => (
+                      <li key={i}>
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-accent underline underline-offset-2 hover:text-accent/80"
+                        >
+                          {s.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           )}
         </TabsContent>
       </Tabs>
+
+      {/* ===== Fullscreen lockdown overlay ===== */}
+      {examRunning && fullscreenExited && (
+        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-background/95 px-6 text-center backdrop-blur-sm">
+          <StopCircle className="h-10 w-10 text-destructive" />
+          <h2 className="font-display text-2xl font-semibold">The test is still running</h2>
+          <p className="max-w-md text-muted-foreground">
+            You left fullscreen. Return to fullscreen to continue the test, or finish the test to
+            submit your answers.
+          </p>
+          <div className="font-display text-5xl font-semibold tabular-nums">
+            {formatTime(examTimeLeft)}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+            <Button
+              onClick={() => {
+                void document.documentElement.requestFullscreen?.().catch(() => {});
+              }}
+            >
+              <Play className="h-4 w-4" />
+              Resume fullscreen
+            </Button>
+            <Button variant="secondary" onClick={handleFinishExam} disabled={grading}>
+              {grading ? "Submitting…" : "Finish & submit test"}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

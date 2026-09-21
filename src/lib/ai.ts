@@ -32,9 +32,25 @@ export type SlideDeck = {
   slides: Array<{ title: string; bullets: string[] }>;
 };
 
-export type ExamLevel = "GCSE" | "A-Level";
+/** Exam level / qualification. Free string so any system can be used (GCSE, A-Level, IGCSE, IB, SAT, university, etc.). */
+export type ExamLevel = string;
 
-export const EXAM_LEVELS: ExamLevel[] = ["GCSE", "A-Level"];
+/** Curated list for the dropdown, plus a "Custom" option that lets the user type any level. */
+export const EXAM_LEVELS: ExamLevel[] = [
+  "Year 6 (primary)",
+  "Year 7",
+  "Year 8",
+  "Year 9",
+  "Year 10",
+  "Year 11",
+  "GCSE",
+  "A-Level",
+  "IGCSE",
+  "IB (International Baccalaureate)",
+  "SAT",
+  "University entrance",
+  "Custom",
+];
 
 export const EXAM_BOARDS = [
   "AQA",
@@ -44,7 +60,61 @@ export const EXAM_BOARDS = [
   "Pearson",
   "CCEA",
   "Cambridge (CIE)",
+  "General / no board",
 ];
+
+/**
+ * Interpret a free-text exam level into a difficulty band the setter can follow.
+ * "Year 9" should NOT produce A-Level essay questions — it should be age-appropriate.
+ */
+function difficultyForLevel(level: string): { band: string; guidance: string } {
+  const l = level.toLowerCase();
+  if (l.includes("year 6") || l.includes("primary") || l.includes("ks2")) {
+    return {
+      band: "Primary / early secondary",
+      guidance:
+        "Short, concrete questions with simple recall and basic reasoning. Use friendly language, small numbers, and single-step tasks. No extended writing, no abstract theory. 1-2 marks per question.",
+    };
+  }
+  if (l.includes("year 7") || l.includes("year 8") || l.includes("ks3") || l.includes("year 9")) {
+    return {
+      band: "Key Stage 3 (lower secondary)",
+      guidance:
+        "Age-appropriate questions for a Key Stage 3 student (roughly ages 11-14). Clear and concrete, with some multi-step reasoning but NO advanced-level analysis. Use straightforward command words (State, List, Describe, Explain briefly, Calculate). Avoid long extended writing, avoid university-level terminology, and keep marks low (1-3). A 'year 9' student should find this challenging but manageable.",
+    };
+  }
+  if (l.includes("gcse") || l.includes("year 10") || l.includes("year 11") || l.includes("ks4")) {
+    return {
+      band: "GCSE / Key Stage 4",
+      guidance:
+        "Standard GCSE-level questions: some recall, some explanation, and a few higher-level evaluation. Use authentic GCSE command words (State, Explain, Describe, Calculate, Evaluate, Discuss). Marks 1-6, with occasional extended-answer questions.",
+    };
+  }
+  if (
+    l.includes("a-level") ||
+    l.includes("a level") ||
+    l.includes("ib") ||
+    l.includes("international baccalaureate")
+  ) {
+    return {
+      band: "Advanced / Sixth form",
+      guidance:
+        "Advanced-level questions requiring analysis, evaluation and extended writing. Use command words like Analyse, Evaluate, Discuss, Assess, Compare. Include multi-step problems and some essay-style answers. Marks 4-12.",
+    };
+  }
+  if (l.includes("sat") || l.includes("entrance") || l.includes("university")) {
+    return {
+      band: "University / entrance",
+      guidance:
+        "University or entrance-exam level: rigorous, multi-part, requiring strong analysis and extended responses. Marks 5-15.",
+    };
+  }
+  return {
+    band: "General / unspecified",
+    guidance:
+      "Match the difficulty to the stated level. If the level is a school year (like 'Year 9'), keep it age-appropriate and concrete, not overly advanced.",
+  };
+}
 
 export type ExamQuestion = {
   number: number;
@@ -52,6 +122,8 @@ export type ExamQuestion = {
   marks: number;
   question: string;
   markScheme: string;
+  /** True when the question asks the student to draw/label a diagram. */
+  needsDrawing?: boolean;
 };
 
 export type ExamPaper = {
@@ -69,6 +141,8 @@ export type ExamPaper = {
 export type ExamAnswer = {
   number: number;
   answer: string;
+  /** Optional data URL of a diagram the student drew (for draw questions). */
+  drawingDataUrl?: string;
 };
 
 /** AI feedback for a single graded question. */
@@ -79,6 +153,10 @@ export type GradedQuestion = {
   feedback: string;
   correctPoints: string[];
   missingPoints: string[];
+  /** Spelling, punctuation and grammar feedback for this answer. */
+  spag: string[];
+  /** Any specific mistakes the student made (content or phrasing). */
+  mistakes: string[];
 };
 
 /** Full AI marking result for a completed paper. */
@@ -329,6 +407,8 @@ export async function generateExamPaper(input: {
   level: ExamLevel;
   board: string;
   topic?: string;
+  /** The student's own course notes/files to base the questions on. */
+  notes?: string;
 }): Promise<ExamPaper> {
   const { searchWeb } = await import("./search");
 
@@ -347,7 +427,14 @@ export async function generateExamPaper(input: {
     // Web search is best-effort — fall through to the model's own knowledge.
   }
 
-  const system = `You are a UK exam paper setter for ${input.level} ${input.board} ${input.subject}. Return JSON:
+  const diff = difficultyForLevel(input.level);
+
+  // Ground the paper in the student's saved course notes when available.
+  const notesBlock = input.notes?.trim()
+    ? `\n\nSTUDENT'S COURSE NOTES (base the questions and topics on THIS material, using the same terminology and depth the student is learning):\n${input.notes.trim()}`
+    : "";
+
+  const system = `You are an exam paper setter for ${input.level} ${input.board} ${input.subject}. Return JSON:
 {
   "paper": "Paper 1",
   "title": "short title",
@@ -358,15 +445,22 @@ export async function generateExamPaper(input: {
       "topic": "the topic this question covers",
       "marks": 4,
       "question": "the full question, written like a real exam question using exam command words",
-      "markScheme": "the model answer / mark scheme points"
+      "markScheme": "the model answer / mark scheme points",
+      "needsDrawing": true
     }
   ]
 }
 
-Create a realistic exam paper with 8 to 12 questions covering the ${input.level} specification for ${input.subject} (${input.board}).
-- Use authentic exam command words and question styles for ${input.level} (e.g. "State", "Explain", "Describe", "Calculate", "Evaluate", "Discuss").
-- Match the mark allocation to the difficulty (e.g. 1-2 marks for recall, 3-4 for explanation, 5-6 for evaluation/essay).
-- Mirror the format of real past papers (${input.board}) and ${input.level} mark schemes.
+Create a realistic exam paper with 8 to 12 questions covering the ${input.level} specification for ${input.subject} (${input.board}).${notesBlock}
+
+DIFFICULTY BAND: ${diff.band}
+DIFFICULTY GUIDANCE: ${diff.guidance}
+
+- Use authentic exam command words and question styles appropriate for the level.
+- Match the mark allocation to the difficulty.
+- Mirror the format of real past papers for ${input.board} and ${input.level}.
+- When the subject is a language or humanities subject, include some questions that require written/essay answers where spelling, punctuation and grammar matter.
+- If a question naturally asks the student to label or draw a diagram (e.g. for cells, circuits, geometry, maps, graphs), phrase it as "Draw and label a diagram of …" or "On the diagram, label …" so the student knows to use the drawing box.
 - MATH FORMATTING: When a question or mark scheme involves maths, write it in LaTeX using inline math between single dollar signs (e.g. \\(\\sqrt{2}\\)) and display math between double dollar signs (e.g. \\[\\frac{a}{b}\\]). Never write "sqrt(2)" or "x^2" as plain text.${contextBlock}`;
 
   const raw = await groqChat(
@@ -374,7 +468,7 @@ Create a realistic exam paper with 8 to 12 questions covering the ${input.level}
       { role: "system", content: system },
       {
         role: "user",
-        content: `Subject: ${input.subject}\nExam level: ${input.level}\nExam board: ${input.board}\nTopic focus (optional): ${input.topic || "full specification"}`,
+        content: `Subject: ${input.subject}\nExam level: ${input.level}\nExam board: ${input.board}\nTopic focus (optional): ${input.topic || "full specification"}${input.notes?.trim() ? `\n\nCourse notes to base the paper on:\n${input.notes.trim()}` : ""}`,
       },
     ],
     { json: true, temperature: 0.5, maxTokens: 6000 },
@@ -388,6 +482,7 @@ Create a realistic exam paper with 8 to 12 questions covering the ${input.level}
         marks: typeof q?.marks === "number" ? q.marks : 0,
         question: typeof q?.question === "string" ? q.question : "",
         markScheme: typeof q?.markScheme === "string" ? q.markScheme : "",
+        needsDrawing: q?.needsDrawing === true,
       }))
     : [];
 
@@ -419,14 +514,19 @@ export async function gradeExam(input: {
     .join("\n\n");
 
   const answersBlock = input.answers
-    .map((a) => `Question ${a.number}:\n${a.answer || "(no answer given)"}`)
+    .map((a) => {
+      const drawing = a.drawingDataUrl
+        ? `\n[Student drew a diagram — see attached image for question ${a.number}]`
+        : "";
+      return `Question ${a.number}:\n${a.answer || "(no answer given)"}${drawing}`;
+    })
     .join("\n\n");
 
-  const system = `You are a strict but encouraging UK exam marker for ${input.paper.level} ${input.paper.board} ${input.paper.subject}. Mark the student's answers against the provided mark scheme, following the official mark-scheme guidance for ${input.paper.level} (apply the correct command words, levels of response, and mark allocation). Return JSON:
+  const system = `You are a strict but encouraging exam marker for ${input.paper.level} ${input.paper.board} ${input.paper.subject}. Mark the student's answers against the provided mark scheme, following the official mark-scheme guidance for ${input.paper.level} (apply the correct command words, levels of response, and mark allocation). Return JSON:
 {
   "totalAwarded": 0,
   "totalMax": 0,
-  "grade": "e.g. 8, 7, A*, A, B, C or 'U'",
+  "grade": "e.g. 9, 8, 7, A*, A, B, C, 'U', or a pass/fail label appropriate to the level",
   "feedback": "2-3 sentences of overall feedback on strengths and areas to improve",
   "questions": [
     {
@@ -435,23 +535,48 @@ export async function gradeExam(input: {
       "marksMax": 0,
       "feedback": "specific feedback on this answer",
       "correctPoints": ["what they got right"],
-      "missingPoints": ["what they missed"]
+      "missingPoints": ["what they missed"],
+      "spag": ["specific spelling, punctuation or grammar issues in this answer"],
+      "mistakes": ["specific factual or logical errors the student made"]
     }
   ]
 }
 
 Mark every question. Be fair and precise: award marks only for points that genuinely match the mark scheme, but give credit for partially correct answers. Be encouraging in the feedback.
+
+IMPORTANT — do NOT require the student's answer to match the mark scheme word-for-word:
+- Accept any answer that conveys the correct idea, even if phrased differently. Credit understanding, not exact wording.
+- If a point is expressed correctly but in the student's own words, award the mark.
+- Only mark something wrong when it is genuinely incorrect or missing, not merely worded differently.
+
+SPaG (Spelling, Punctuation, Grammar):
+- In "spag", list specific spelling mistakes, punctuation errors, and grammar errors you spotted in the student's answer (e.g. "misspelling of 'necessary'", "missing comma", "subject-verb agreement"). Only include SPaG points for answers where writing quality matters (written/essay answers).
+- In "mistakes", list any content errors or misunderstandings.
+
 MATH FORMATTING: When you reference maths in feedback or mark scheme points, write it in LaTeX using inline math between single dollar signs (e.g. \\(\\sqrt{2}\\)) and display math between double dollar signs (e.g. \\[\\frac{a}{b}\\]). Never write "sqrt(2)" or "x^2" as plain text.`;
 
-  const raw = await groqChat(
+    const raw = await groqChat(
     [
       { role: "system", content: system },
       {
         role: "user",
-        content: `PAPER QUESTIONS:\n${questionsBlock}\n\nSTUDENT ANSWERS:\n${answersBlock}`,
+        content: [
+          { type: "text", text: `PAPER QUESTIONS:\n${questionsBlock}\n\nSTUDENT ANSWERS:\n${answersBlock}` },
+          ...input.answers
+            .filter((a) => a.drawingDataUrl)
+            .map((a) => ({
+              type: "image_url",
+              image_url: { url: a.drawingDataUrl as string },
+            })),
+        ],
       },
     ],
-    { json: true, temperature: 0.3, maxTokens: 6000 },
+    {
+      json: true,
+      temperature: 0.3,
+      maxTokens: 6000,
+      model: input.answers.some((a) => a.drawingDataUrl) ? "qwen/qwen3.6-27b" : undefined,
+    },
   );
 
   const parsed = extractJson<Omit<ExamGrade, "totalMax">>(raw);
@@ -467,6 +592,12 @@ MATH FORMATTING: When you reference maths in feedback or mark scheme points, wri
           : [],
         missingPoints: Array.isArray(g?.missingPoints)
           ? g.missingPoints.map((p) => String(p))
+          : [],
+        spag: Array.isArray(g?.spag)
+          ? g.spag.map((p) => String(p))
+          : [],
+        mistakes: Array.isArray(g?.mistakes)
+          ? g.mistakes.map((p) => String(p))
           : [],
       }))
     : [];
