@@ -25,6 +25,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -173,6 +174,7 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
   const [customLevel, setCustomLevel] = useState("");
   const [examBoard, setExamBoard] = useState("AQA");
   const [examTopic, setExamTopic] = useState("");
+  const [examUseNotes, setExamUseNotes] = useState(true);
   const [examLoading, setExamLoading] = useState(false);
   const [examError, setExamError] = useState("");
   const [examAnswers, setExamAnswers] = useState<Record<number, string>>({});
@@ -378,13 +380,15 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
     setExamError("");
     try {
       const level = examLevel === "Custom" ? customLevel.trim() : examLevel;
-      // Base the paper on the student's saved course notes/files when present.
-      const notes = [
-        workspace.summary.trim(),
-        ...workspace.files.map((f) => (f.text.trim() ? `${f.name}:\n${f.text.trim()}` : "")),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      // Base the paper on the student's saved course notes/files when requested.
+      const notes = examUseNotes
+        ? [
+            workspace.summary.trim(),
+            ...workspace.files.map((f) => (f.text.trim() ? `${f.name}:\n${f.text.trim()}` : "")),
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+        : "";
       const paper = await generateExamPaper({
         subject: workspace.subject || "General",
         level: level || "General",
@@ -1021,12 +1025,13 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
                 {examLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpenCheck className="h-4 w-4" />}
                 {examLoading ? "Generating paper…" : "Generate exam paper"}
               </Button>
-              {(workspace.summary.trim() || workspace.files.some((f) => f.text.trim())) && (
-                <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <FileText className="h-3.5 w-3.5 shrink-0 text-accent" />
-                  This paper will be based on your saved course notes.
-                </p>
-              )}
+              {examUseNotes &&
+                (workspace.summary.trim() || workspace.files.some((f) => f.text.trim())) && (
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-accent" />
+                    This paper will be based on your saved course notes.
+                  </p>
+                )}
               {examError && <p className="text-sm text-destructive">{examError}</p>}
 
               <details className="rounded-lg border bg-muted/20 px-3 py-2">
@@ -1083,6 +1088,23 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
                       placeholder="e.g. Algebra, Cell biology, Shakespeare — leave blank for the full specification"
                     />
                   </div>
+                  <label
+                    htmlFor="exam-use-notes"
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border bg-card px-3 py-2.5"
+                  >
+                    <Checkbox
+                      id="exam-use-notes"
+                      checked={examUseNotes}
+                      onCheckedChange={(checked) => setExamUseNotes(checked === true)}
+                      className="mt-0.5"
+                    />
+                    <span className="text-sm">
+                      <span className="block font-medium">Base the test on my course notes</span>
+                      <span className="text-xs text-muted-foreground">
+                        Use the files and analysis summary saved in this workspace.
+                      </span>
+                    </span>
+                  </label>
                 </div>
               </details>
             </CardContent>
