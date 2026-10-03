@@ -185,6 +185,7 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
   // Timed test state
   const [examRunning, setExamRunning] = useState(false);
   const [examFinished, setExamFinished] = useState(false);
+  const [examStarted, setExamStarted] = useState(false);
   const [examDuration, setExamDuration] = useState(30); // minutes
   const [examDeadline, setExamDeadline] = useState<number | null>(null); // epoch ms
   const [examTimeLeft, setExamTimeLeft] = useState(0); // seconds
@@ -399,6 +400,10 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
       setExamPaper(workspace.id, paper);
       setExamAnswers({});
       setExamGrade(workspace.id, null);
+      // Don't reveal the paper yet — the user starts it with "Start test".
+      setExamStarted(false);
+      setExamRunning(false);
+      setExamFinished(false);
     } catch (error) {
       setExamError(error instanceof Error ? error.message : "Exam generation failed");
     } finally {
@@ -482,6 +487,7 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
     setExamGrade(workspace.id, null);
     setExamFinished(false);
     setFullscreenExited(false);
+    setExamStarted(true);
     const durationSeconds = Math.max(1, examDuration) * 60;
     setExamDeadline(Date.now() + durationSeconds * 1000);
     setExamTimeLeft(durationSeconds);
@@ -1110,7 +1116,44 @@ function Workspace({ workspace }: { workspace: WorkspaceView }) {
             </CardContent>
           </Card>
 
-          {workspace.examPaper && (
+          {workspace.examPaper && !examStarted && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BookOpenCheck className="h-5 w-5 text-accent" />
+                  Your exam paper
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {workspace.examPaper.title} · {workspace.examPaper.subject} ·{" "}
+                  {workspace.examPaper.level} · {workspace.examPaper.board} · {totalMarks} marks
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="h-4 w-4 text-accent" />
+                    Time: {examDuration} minutes
+                  </div>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={examDuration}
+                    onChange={(event) =>
+                      setExamDuration(Math.max(1, Number(event.target.value) || 1))
+                    }
+                    className="w-28"
+                    aria-label="Time limit in minutes"
+                  />
+                  <Button onClick={handleStartExam}>
+                    <Play className="h-4 w-4" />
+                    Start test
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {workspace.examPaper && examStarted && (
             <div className="space-y-4">
               {/* ===== Exam paper cover ===== */}
               <div className="rounded-xl border bg-card p-6 shadow-sm">
